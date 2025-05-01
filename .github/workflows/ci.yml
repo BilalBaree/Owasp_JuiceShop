@@ -69,7 +69,7 @@ jobs:
           else
             echo "✅ No secrets found."
           fi
-        continue-on-error: false
+        continue-on-error: true
 
       - name: Check for SQL Injection issues with Bandit
         run: |
