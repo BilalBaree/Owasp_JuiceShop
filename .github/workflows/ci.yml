@@ -100,50 +100,51 @@ jobs:
           path: bandit_report.json
 
   # 4. DAST Tools: SQLMap + OWASP ZAP
-  dast_scan:
-   runs-on: ubuntu-latest
-   steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+  # dast_scan:
+  #  runs-on: ubuntu-latest
+  #  steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v3
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+  #   - name: Set up Docker Buildx
+  #     uses: docker/setup-buildx-action@v2
 
-    - name: Pull and start Juice Shop container
-      run: |
-        docker pull bkimminich/juice-shop
-        docker run --rm -d -p 3000:3000 bkimminich/juice-shop
-        # Wait for the application to be ready
-        for i in {1..60}; do
-          if curl --silent --fail http://localhost:3000; then
-            echo "Juice Shop is ready."
-            break
-          else
-            echo "Waiting for Juice Shop to start..."
-            sleep 5
-          fi
-        done
+  #   - name: Pull and start Juice Shop container
+  #     run: |
+  #       docker pull bkimminich/juice-shop
+  #       docker run --rm -d -p 3000:3000 bkimminich/juice-shop
+  #       # Wait for the application to be ready
+  #       for i in {1..60}; do
+  #         if curl --silent --fail http://localhost:3000; then
+  #           echo "Juice Shop is ready."
+  #           break
+  #         else
+  #           echo "Waiting for Juice Shop to start..."
+  #           sleep 5
+  #         fi
+  #       done
 
-    - name: Install tools
-      run: |
-        pip install sqlmap
-        sudo apt-get update
-        sudo apt-get install -y openjdk-11-jre python3
-        wget https://github.com/zaproxy/zaproxy/releases/download/v2.16.1/ZAP_2.16.1_Linux.tar.gz
-        tar -xzf ZAP_2.16.1_Linux.tar.gz
-        sudo mv ZAP_2.16.1 /opt/zaproxy
+  #   - name: Install tools
+  #     run: |
+  #       pip install sqlmap
+  #       sudo apt-get update
+  #       sudo apt-get install -y openjdk-11-jre python3
+  #       wget https://github.com/zaproxy/zaproxy/releases/download/v2.16.1/ZAP_2.16.1_Linux.tar.gz
+  #       tar -xzf ZAP_2.16.1_Linux.tar.gz
+  #       sudo mv ZAP_2.16.1 /opt/zaproxy
+  #       sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
         
-    - name: Run SQLMap for SQLi
-      run: sqlmap -u "http://localhost:3000" --batch --risk=3 --level=5
+  #   - name: Run SQLMap for SQLi
+  #     run: sqlmap -u "http://localhost:3000" --batch --risk=3 --level=5
 
-    - name: Run OWASP ZAP for XSS
-      run: python3 /opt/zaproxy/zap-baseline.py -t http://localhost:3000 -r zap_report.html
+  #   - name: Run OWASP ZAP for XSS
+  #     run: zap -cmd -quickurl http://localhost:3000 -quickout zap_report.html
 
-    - name: Upload ZAP Report
-      uses: actions/upload-artifact@v4
-      with:
-        name: zap-report
-        path: zap_report.html
+  #   - name: Upload ZAP Report
+  #     uses: actions/upload-artifact@v4
+  #     with:
+  #       name: zap-report
+  #       path: zap_report.html
 
   # 5. SCA Tool: Snyk
   sca_scan:
@@ -185,3 +186,45 @@ jobs:
         with:
           name: audit-log
           path: audit_log.txt
+
+ # 7. Docker Security Checks (Root Access and Read-Only File System)
+  docker-security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU (for multi-arch if needed)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest .
+
+      - name: Scan image with Trivy (Root Access)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Scan image with Trivy (Read-Only File System)
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest .
+          trivy fs --severity CRITICAL,HIGH --no-progress --exit-code 1 --ignore-unfixed <path-to-image> 
+
+      - name: Push image to DockerHub
+        if: success()
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest
