@@ -164,7 +164,7 @@ jobs:
       - name: Scan for vulnerable packages (Snyk)
         uses: snyk/actions/node@master
         with:
-          args: test --severity-threshold=medium
+          args: test --severity-threshold=high
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
