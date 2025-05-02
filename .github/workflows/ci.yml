@@ -188,43 +188,58 @@ jobs:
           path: audit_log.txt
 
  # 7. Docker Security Checks (Root Access and Read-Only File System)
-  docker-security:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+docker-security:
+  runs-on: ubuntu-latest
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-      - name: Log in to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Log in to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set up QEMU (for multi-arch if needed)
-        uses: docker/setup-qemu-action@v3
+    - name: Set up QEMU (for multi-arch if needed)
+      uses: docker/setup-qemu-action@v3
 
-      - name: Build Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest .
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest .
 
-      - name: Scan image with Trivy (Root Access)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest'
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
+    - name: Scan image with Trivy (Root Access)
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest'
+        format: 'table'
+        exit-code: '1'
+        severity: 'CRITICAL,HIGH'
+        ignore-unfixed: true
 
-      - name: Scan image with Trivy (Read-Only File System)
-        run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest .
-          trivy fs --severity CRITICAL,HIGH --no-progress --exit-code 1 --ignore-unfixed <path-to-image> 
+    - name: Scan image with Trivy (Read-Only File System)
+      run: |
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest .
+        trivy fs --severity CRITICAL,HIGH --no-progress --exit-code 1 --ignore-unfixed .
+        if [ $? -eq 0 ]; then
+          echo "✅ No issues detected in Read-Only File System."
+        else
+          echo "❌ Issues detected in Read-Only File System."
+          exit 1
+        fi
 
-      - name: Push image to DockerHub
-        if: success()
-        run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest
+    - name: Clean up trivy_envs.txt (if it exists)
+      run: |
+        if [ -f trivy_envs.txt ]; then
+          rm -f trivy_envs.txt
+          echo "✅ Cleaned up trivy_envs.txt."
+        else
+          echo "No trivy_envs.txt found to clean."
+        fi
+
+    - name: Push image to DockerHub
+      if: success()
+      run: |
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest
