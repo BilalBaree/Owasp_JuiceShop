@@ -3,10 +3,10 @@ name: IaC Security with Terraform, Checkov & Conftest
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
     branches:
-      - main
+      - master
 
 jobs:
   iac-security-scan:
