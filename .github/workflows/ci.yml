@@ -2,16 +2,15 @@ name: Secure CI/CD Pipeline
 
 on:
   push:
-    branches: master
+    branches: [master]
   pull_request:
-    branches: master
+    branches: [master]
 
 jobs:
 
   # 1. CI Security Checks
-   security-scan:
+  security-scan:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -23,7 +22,6 @@ jobs:
 
       - name: Install dependencies
         run: npm install
- 
 
       - name: Enforce code reviews (Only on pull request)
         if: github.event_name == 'pull_request'
@@ -33,7 +31,7 @@ jobs:
 
       - name: Enforce signed commits
         run: |
-          git log --pretty=format:'%h %G? %an' | while read line; do
+          git log ${{ github.event.before }}..${{ github.sha }} --pretty=format:'%h %G? %an' | while read line; do
             commit_hash=$(echo $line | cut -d ' ' -f 1)
             commit_status=$(echo $line | cut -d ' ' -f 2)
             if [[ "$commit_status" != "G" ]]; then
@@ -61,7 +59,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -87,9 +85,24 @@ jobs:
             exit 1
           fi
 
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit_report.json
+
+      - name: Upload TruffleHog Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: secrets-scan
+          path: secrets_scan_results.json
+
   # 4. DAST Tools: SQLMap + OWASP ZAP
   dast_scan:
     runs-on: ubuntu-latest
+    env:
+      DAST_TARGET_URL: ${{ secrets.DAST_TARGET_URL }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -105,10 +118,10 @@ jobs:
           sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
 
       - name: Run SQLMap for SQLi
-        run: sqlmap -u "http://your-app-url.com" --batch --risk=3 --level=5
+        run: sqlmap -u "${DAST_TARGET_URL}" --batch --risk=3 --level=5
 
       - name: Run OWASP ZAP for XSS
-        run: zap -cmd -quickurl http://your-app-url.com -quickout zap_report.html
+        run: zap -cmd -quickurl "${DAST_TARGET_URL}" -quickout zap_report.html
 
       - name: Upload ZAP Report
         uses: actions/upload-artifact@v4
@@ -149,3 +162,9 @@ jobs:
         run: |
           echo "$(date) - CI/CD pipeline executed for repo: ${{ github.repository }}" >> ./audit_log.txt
           cat ./audit_log.txt
+
+      - name: Upload Audit Log
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-log
+          path: audit_log.txt
