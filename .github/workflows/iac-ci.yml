@@ -1,0 +1,55 @@
+name: IaC Security with Terraform, Checkov & Conftest
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  iac-security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.4.6
+
+      - name: Install Checkov
+        run: |
+          pip install checkov
+
+      - name: Install Conftest
+        run: |
+          CONFTAG=$(curl -s https://api.github.com/repos/open-policy-agent/conftest/releases/latest | grep tag_name | cut -d '"' -f 4)
+          wget https://github.com/open-policy-agent/conftest/releases/download/${CONFTAG}/conftest_${CONFTAG#v}_Linux_x86_64.tar.gz
+          tar -xzf conftest_${CONFTAG#v}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin
+
+
+      # Rule d - IaC Misconfig Detection
+      - name: Run Checkov for misconfigurations
+        run: |
+          checkov -d ./terraform --skip-check CKV_AWS_355 --skip-check CKV_SECRET_1
+
+
+      # Rule e & f - Compliance and Least Privilege using OPA
+      - name: Run Conftest with least privilege policy
+        run: |
+          conftest test terraform/main.tf --policy policies
+
+      # Rule g - Check for hardcoded secrets in Terraform
+      - name: Check for secrets in Terraform using Checkov
+        run: |
+          checkov -d ./terraform --check CKV_SECRET_1
