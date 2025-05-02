@@ -106,21 +106,8 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Install Docker
-      run: |
-        sudo apt-get install -y docker.io
-        sudo systemctl start docker
-        sudo systemctl enable docker
-
-    - name: Install tools
-      run: |
-        pip install sqlmap
-        sudo apt-get update
-        sudo apt-get install -y openjdk-11-jre
-        wget https://github.com/zaproxy/zaproxy/releases/download/v2.16.1/ZAP_2.16.1_Linux.tar.gz
-        tar -xzf ZAP_2.16.1_Linux.tar.gz
-        sudo mv ZAP_2.16.1 /opt/zaproxy
-        sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
 
     - name: Pull and start Juice Shop container
       run: |
@@ -136,6 +123,16 @@ jobs:
             sleep 5
           fi
         done
+
+    - name: Install tools
+      run: |
+        pip install sqlmap
+        sudo apt-get update
+        sudo apt-get install -y openjdk-11-jre
+        wget https://github.com/zaproxy/zaproxy/releases/download/v2.16.1/ZAP_2.16.1_Linux.tar.gz
+        tar -xzf ZAP_2.16.1_Linux.tar.gz
+        sudo mv ZAP_2.16.1 /opt/zaproxy
+        sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
 
     - name: Run SQLMap for SQLi
       run: sqlmap -u "http://localhost:3000" --batch --risk=3 --level=5
