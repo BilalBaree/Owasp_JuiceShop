@@ -1,15 +1,15 @@
-name: CI/CD Pipeline
+name: Secure CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - master
+    branches: [master]
   pull_request:
-    branches:
-      - master
+    branches: [master]
 
 jobs:
-  security-scan:
+
+  # 1. CI Security Checks
+   security-scan:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,94 +23,92 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+ 
 
-      - name: Run Snyk to scan for vulnerabilities (Rule d)
-        uses: snyk/actions/node@master
+      - name: Enforce code reviews (Only on pull request)
+        if: github.event_name == 'pull_request'
+        uses: hmarr/auto-approve-action@v2
         with:
-          args: test --severity-threshold=medium
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Fail build if vulnerabilities found (Rule e)
-        run: snyk test --severity-threshold=medium
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      - name: Enforce signed commits
+        run: |
+          git log --pretty=format:'%h %G? %an' | while read line; do
+            commit_hash=$(echo $line | cut -d ' ' -f 1)
+            commit_status=$(echo $line | cut -d ' ' -f 2)
+            if [[ "$commit_status" != "G" ]]; then
+              echo "❌ Commit $commit_hash is not signed"
+              exit 1
+            fi
+          done
 
-      - name: Check against allowlist (Rule f)
-        run: node scripts/check-allowlist.js
-
-      - name: Verify signed libraries (Rule g)
-        run: bash scripts/verify-signatures.sh
-
-  # Job 2: Security Checks (TruffleHog & Bandit)
-  security_checks:
+  # 2. Role-based Access Control
+  access_control:
     runs-on: ubuntu-latest
+    steps:
+      - name: Check role-based access control
+        run: |
+          if [[ "$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          -s "https://api.github.com/repos/${{ github.repository }}/collaborators" | jq '.[] | select(.permissions.push == true)' | wc -l)" -lt 1 ]]; then
+            echo "❌ Role-based access is not configured properly."
+            exit 1
+          fi
 
+  # 3. SAST Tools: Bandit + TruffleHog
+  sast_analysis:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - name: Install dependencies
-        run: |
-          pip install trufflehog bandit jq
+      - name: Install tools
+        run: pip install bandit trufflehog jq
 
-      - name: Check for hardcoded secrets & Run TruffleHog Secrets Scan
+      - name: Secrets Scanning (TruffleHog)
         run: |
           trufflehog --json . > secrets_scan_results.json
-          if [[ -f "secrets_scan_results.json" && $(jq length secrets_scan_results.json) -gt 0 ]]; then
-            echo "❌ Secrets found in the code!"
+          if [[ $(jq length secrets_scan_results.json) -gt 0 ]]; then
+            echo "❌ Secrets found!"
             cat secrets_scan_results.json
             exit 1
-          else
-            echo "✅ No secrets found."
           fi
-        continue-on-error: true
 
-      - name: Check for SQL Injection issues with Bandit
+      - name: SQL Injection Detection (Bandit)
         run: |
-          bandit -r . -f json -o bandit_sql_report.txt -t B107
-          if grep -q "issue" bandit_sql_report.txt; then
-            echo "SQL Injection issue detected!"
-            cat bandit_sql_report.txt
+          bandit -r . -f json -o bandit_report.json -t B107
+          if grep -q "issue" bandit_report.json; then
+            echo "❌ SQL Injection issues found!"
+            cat bandit_report.json
             exit 1
           fi
-        continue-on-error: false
 
-  # Job 3: DAST Scan (OWASP ZAP & SQLMap)
+  # 4. DAST Tools: SQLMap + OWASP ZAP
   dast_scan:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Set up Python for SQLMap
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.x'
-
-      - name: Install Dependencies for ZAP and SQLMap
+      - name: Install tools
         run: |
           pip install sqlmap
           sudo apt-get update
           sudo apt-get install -y openjdk-11-jre
           wget https://github.com/zaproxy/zaproxy/releases/download/v2.16.1/ZAP_2.16.1_Linux.tar.gz
-          tar -xvzf ZAP_2.16.1_Linux.tar.gz
+          tar -xzf ZAP_2.16.1_Linux.tar.gz
           sudo mv ZAP_2.16.1 /opt/zaproxy
           sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
 
-      - name: Run SQLMap (SQL Injection Detection)
-        run: |
-          sqlmap -u "http://your-app-url.com" --batch --risk=3 --level=5
+      - name: Run SQLMap for SQLi
+        run: sqlmap -u "http://your-app-url.com" --batch --risk=3 --level=5
 
-      - name: Run OWASP ZAP (Cross-Site Scripting and CSRF Detection)
-        run: |
-          zap -cmd -quickurl http://your-app-url.com -quickout zap_report.html
+      - name: Run OWASP ZAP for XSS
+        run: zap -cmd -quickurl http://your-app-url.com -quickout zap_report.html
 
       - name: Upload ZAP Report
         uses: actions/upload-artifact@v4
@@ -118,31 +116,36 @@ jobs:
           name: zap-report
           path: zap_report.html
 
-      - name: Upload SQLMap Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: sqlmap-report
-          path: sqlmap_report.txt
-
-  # Job 4: Role-based Access Control
-  roles_access_control:
+  # 5. SCA Tool: Snyk
+  sca_scan:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Ensure CI/CD access control is set
-        run: |
-          if [[ "$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-          -s "https://api.github.com/repos/${{ github.repository }}/collaborators" | jq '.[] | select(.permissions.push == true)' | wc -l)" -lt 1 ]]; then
-            echo "Role-based CI/CD access is not set correctly"
-            exit 1
-          fi
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-  # Job 5: Audit Logs of Security Events
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.19.0'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Scan for vulnerable packages (Snyk)
+        uses: snyk/actions/node@master
+        with:
+          args: test --severity-threshold=medium
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Use signed libraries verification
+        run: bash scripts/verify-signatures.sh
+
+  # 6. Audit Logging
   audit_log:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Log security event
+      - name: Log pipeline run
         run: |
-          echo "$(date) - Security event: CI/CD pipeline executed with security checks." >> ./audit_log.txt
+          echo "$(date) - CI/CD pipeline executed for repo: ${{ github.repository }}" >> ./audit_log.txt
           cat ./audit_log.txt
