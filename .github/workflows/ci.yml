@@ -69,12 +69,20 @@ jobs:
 
       - name: Secrets Scanning (TruffleHog)
         run: |
-          trufflehog --json . > secrets_scan_results.json
+          trufflehog --json . > secrets_scan_results.json || true
           if [[ $(jq length secrets_scan_results.json) -gt 0 ]]; then
             echo "❌ Secrets found!"
             cat secrets_scan_results.json
             exit 1
+          else
+            echo "✅ No secrets found."
           fi
+
+      - name: Upload TruffleHog Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: secrets-scan
+          path: secrets_scan_results.json
 
       - name: SQL Injection Detection (Bandit)
         run: |
@@ -91,17 +99,15 @@ jobs:
           name: bandit-report
           path: bandit_report.json
 
-      - name: Upload TruffleHog Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: secrets-scan
-          path: secrets_scan_results.json
-
   # 4. DAST Tools: SQLMap + OWASP ZAP
   dast_scan:
     runs-on: ubuntu-latest
-    env:
-      DAST_TARGET_URL: ${{ secrets.DAST_TARGET_URL }}
+    services:
+      juice-shop:
+        image: bkimminich/juice-shop
+        ports:
+          - 3000:3000
+        options: --health-cmd="curl --silent --fail localhost:3000 || exit 1" --health-timeout=30s --health-start-period=30s --health-retries=3
 
     steps:
       - name: Checkout code
@@ -118,10 +124,10 @@ jobs:
           sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
 
       - name: Run SQLMap for SQLi
-        run: sqlmap -u "${DAST_TARGET_URL}" --batch --risk=3 --level=5
+        run: sqlmap -u "http://localhost:3000" --batch --risk=3 --level=5
 
       - name: Run OWASP ZAP for XSS
-        run: zap -cmd -quickurl "${DAST_TARGET_URL}" -quickout zap_report.html
+        run: zap -cmd -quickurl http://localhost:3000 -quickout zap_report.html
 
       - name: Upload ZAP Report
         uses: actions/upload-artifact@v4
