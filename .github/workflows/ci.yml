@@ -217,13 +217,10 @@ jobs:
         run: |
           docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest .
 
-      - name: Scan Docker image for Root Access (Clair)
+      - name: Scan Docker image for vulnerabilities (Grype)
         run: |
-          curl -sL https://github.com/coreos/clair/releases/download/v2.0.9/clairctl-linux-amd64 -o clairctl
-          chmod +x clairctl
-          sudo mv clairctl /usr/local/bin/
-          clairctl analyze --local --image ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest
-          clairctl report ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          grype ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest --fail-on high
         continue-on-error: true
 
       - name: Scan image for Read-Only File System violations (Trivy)
