@@ -2,9 +2,9 @@ name: Secure CI/CD Pipeline
 
 on:
   push:
-    branches: [master]
+    branches: master
   pull_request:
-    branches: [master]
+    branches: master
 
 jobs:
 
@@ -22,12 +22,6 @@ jobs:
 
       - name: Install dependencies
         run: npm install
-
-      - name: Install Snyk CLI
-        run: npm install -g snyk
-
-      - name: Authenticate with Snyk
-        run: snyk auth ${{ secrets.SNYK_TOKEN }}
 
       - name: Enforce code reviews (Only on pull request)
         if: github.event_name == 'pull_request'
@@ -105,53 +99,6 @@ jobs:
           name: bandit-report
           path: bandit_report.json
 
-  # 4. DAST Tools: SQLMap + OWASP ZAP
-  # dast_scan:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v3
-  #
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v2
-  #
-  #     - name: Pull and start Juice Shop container
-  #       run: |
-  #         docker pull bkimminich/juice-shop
-  #         docker run --rm -d -p 3000:3000 bkimminich/juice-shop
-  #         # Wait for the application to be ready
-  #         for i in {1..60}; do
-  #           if curl --silent --fail http://localhost:3000; then
-  #             echo "Juice Shop is ready."
-  #             break
-  #           else
-  #             echo "Waiting for Juice Shop to start..."
-  #             sleep 5
-  #           fi
-  #         done
-  #
-  #     - name: Install tools
-  #       run: |
-  #         pip install sqlmap
-  #         sudo apt-get update
-  #         sudo apt-get install -y openjdk-11-jre python3
-  #         wget https://github.com/zaproxy/zaproxy/releases/download/v2.16.1/ZAP_2.16.1_Linux.tar.gz
-  #         tar -xzf ZAP_2.16.1_Linux.tar.gz
-  #         sudo mv ZAP_2.16.1 /opt/zaproxy
-  #         sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
-  #
-  #     - name: Run SQLMap for SQLi
-  #       run: sqlmap -u "http://localhost:3000" --batch --risk=3 --level=5
-  #
-  #     - name: Run OWASP ZAP for XSS
-  #       run: zap -cmd -quickurl http://localhost:3000 -quickout zap_report.html
-  #
-  #     - name: Upload ZAP Report
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: zap-report
-  #         path: zap_report.html
-
   # 5. SCA Tool: Snyk
   sca_scan:
     runs-on: ubuntu-latest
@@ -207,7 +154,6 @@ jobs:
         run: |
           docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest .
 
-      # 2. Restrict Root Access in Containers (Clair)
       - name: Scan Docker image for Root Access (Clair)
         run: |
           curl -sL https://github.com/coreos/clair/releases/download/v2.0.9/clairctl-linux-amd64 -o clairctl
@@ -215,15 +161,13 @@ jobs:
           sudo mv clairctl /usr/local/bin/
           clairctl analyze --local --image ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest
           clairctl report ${{ secrets.DOCKERHUB_USERNAME }}/juice-shop:latest
-        continue-on-error: true  # If no root access issue found, don't fail the pipeline
+        continue-on-error: true
 
-      # 3. Use Read-Only File System for Containers (Trivy)
       - name: Scan image for Read-Only File System violations (Trivy)
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/workspace aquasecurity/trivy fs --severity CRITICAL,HIGH --exit-code 1 --no-progress --ignore-unfixed .
-        continue-on-error: true # If no violation found, the pipeline will continue
+        continue-on-error: true
 
-      # 4. Push Docker image to DockerHub if no security issues
       - name: Push Docker image to DockerHub
         if: success()
         run: |
@@ -245,3 +189,42 @@ jobs:
         with:
           name: trivy-report
           path: trivy-report.json
+
+  # 9. IaC Security Scan
+  iac-security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.4.6
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Install Conftest
+        run: |
+          CONFTAG=$(curl -s https://api.github.com/repos/open-policy-agent/conftest/releases/latest | grep tag_name | cut -d '"' -f 4)
+          wget https://github.com/open-policy-agent/conftest/releases/download/${CONFTAG}/conftest_${CONFTAG#v}_Linux_x86_64.tar.gz
+          tar -xzf conftest_${CONFTAG#v}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin
+
+      - name: Run Checkov for misconfigurations
+        run: |
+          checkov -d ./terraform --skip-check CKV_AWS_355 --skip-check CKV_SECRET_1
+
+      - name: Run Conftest with least privilege policy
+        run: |
+          conftest test terraform/main.tf --policy policies
+
+      - name: Check for secrets in Terraform using Checkov
+        run: |
+          checkov -d ./terraform --check CKV_SECRET_1
