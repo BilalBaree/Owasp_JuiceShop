@@ -118,29 +118,29 @@ jobs:
           # 4. DAST Tools: SQLMap + OWASP ZAP
   dast_scan:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-  
+        uses: actions/checkout@v4
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-  
+
       - name: Pull and start Juice Shop container
         run: |
           docker pull bkimminich/juice-shop
           docker run --rm -d -p 3000:3000 bkimminich/juice-shop
-          # Wait for the application to be ready
           for i in {1..60}; do
             if curl --silent --fail http://localhost:3000; then
-              echo "Juice Shop is ready."
+              echo "✅ Juice Shop is ready."
               break
             else
-              echo "Waiting for Juice Shop to start..."
+              echo "⏳ Waiting for Juice Shop to start..."
               sleep 5
             fi
           done
-  
-      - name: Install tools
+
+      - name: Install DAST tools
         run: |
           pip install sqlmap
           sudo apt-get update
@@ -149,13 +149,20 @@ jobs:
           tar -xzf ZAP_2.16.1_Linux.tar.gz
           sudo mv ZAP_2.16.1 /opt/zaproxy
           sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
-  
-      - name: Run SQLMap for SQLi
-        run: sqlmap -u "http://localhost:3000" --batch --risk=3 --level=5
-  
-      - name: Run OWASP ZAP for XSS
-        run: zap -cmd -quickurl http://localhost:3000 -quickout zap_report.html
-  
+
+      - name: Run SQLMap against local Juice Shop
+        run: |
+          sqlmap -u "http://localhost:3000" --batch --risk=3 --level=5
+
+      - name: Run ZAP against Heroku preview instance
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target: 'https://preview.owasp-juice.shop'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j'
+          output_file: zap_report.html
+
       - name: Upload ZAP Report
         uses: actions/upload-artifact@v4
         with:
