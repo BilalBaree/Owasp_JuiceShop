@@ -115,6 +115,53 @@ jobs:
           name: bandit-report
           path: bandit_report.json
 
+          # 4. DAST Tools: SQLMap + OWASP ZAP
+  dast_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+  
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+  
+      - name: Pull and start Juice Shop container
+        run: |
+          docker pull bkimminich/juice-shop
+          docker run --rm -d -p 3000:3000 bkimminich/juice-shop
+          # Wait for the application to be ready
+          for i in {1..60}; do
+            if curl --silent --fail http://localhost:3000; then
+              echo "Juice Shop is ready."
+              break
+            else
+              echo "Waiting for Juice Shop to start..."
+              sleep 5
+            fi
+          done
+  
+      - name: Install tools
+        run: |
+          pip install sqlmap
+          sudo apt-get update
+          sudo apt-get install -y openjdk-11-jre python3
+          wget https://github.com/zaproxy/zaproxy/releases/download/v2.16.1/ZAP_2.16.1_Linux.tar.gz
+          tar -xzf ZAP_2.16.1_Linux.tar.gz
+          sudo mv ZAP_2.16.1 /opt/zaproxy
+          sudo ln -s /opt/zaproxy/zap.sh /usr/local/bin/zap
+  
+      - name: Run SQLMap for SQLi
+        run: sqlmap -u "http://localhost:3000" --batch --risk=3 --level=5
+  
+      - name: Run OWASP ZAP for XSS
+        run: zap -cmd -quickurl http://localhost:3000 -quickout zap_report.html
+  
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap_report.html
+
   # 5. SCA Tool: Snyk
   sca_scan:
     runs-on: ubuntu-latest
