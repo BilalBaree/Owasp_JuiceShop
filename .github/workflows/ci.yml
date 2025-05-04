@@ -298,19 +298,19 @@ jobs:
         run: |
           checkov -d ./terraform --check CKV_SECRET_1
 
- # # 9. SIEM tool for Logging & Monitoring
- #  SIEM:
- #    runs-on : ubuntu-latest
- #    steps:
- #      - name: Send log to Datadog via API
- #        run: |
- #         curl -X POST "https://http-intake.logs.datadoghq.eu/v1/input" \
- #         -H "Content-Type: application/json" \
- #         -H "DD-API-KEY: ${{ secrets.DATADOG_API_KEY }}" \
- #         -d '{
- #          "message": "Security scan passed for commit ${{ github.sha }} by ${{ github.actor }}",
- #          "ddsource": "github-actions",
- #          "service": "ci-cd",
- #          "hostname": "github-runner",
- #          "status": "info"
- #         }'
+ # 9. SIEM tool for Logging & Monitoring
+  SIEM:
+    runs-on : ubuntu-latest
+    steps:
+      - name: Send log to Datadog via API
+        run: |
+         curl -X POST "https://http-intake.logs.datadoghq.eu/v1/input" \
+         -H "Content-Type: application/json" \
+         -H "DD-API-KEY: ${{ secrets.DATADOG_API_KEY }}" \
+         -d '{
+          "message": "Security scan passed for commit ${{ github.sha }} by ${{ github.actor }}",
+          "ddsource": "github-actions",
+          "service": "ci-cd",
+          "hostname": "github-runner",
+          "status": "info"
+         }'
