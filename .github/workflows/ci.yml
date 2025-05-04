@@ -297,3 +297,55 @@ jobs:
       - name: Check for secrets in Terraform using Checkov
         run: |
           checkov -d ./terraform --check CKV_SECRET_1
+          
+  # 10. OpenVAS Vulnerability Scan
+  openvas_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start GVM container
+        run: |
+          docker run -d --name gvm -p 9392:9392 -e PASSWORD=admin securecompliance/gvm
+          echo "⏳ Waiting for GVM to fully start..."
+          sleep 90  # Ensure GVM has time to initialize fully
+
+      - name: Check GVM is up
+        run: curl -sSf http://localhost:9392 || (echo "❌ GVM did not start." && exit 1)
+
+      - name: Run Nmap against Juice Shop and feed to GVM
+        run: |
+          sudo apt-get update && sudo apt-get install -y nmap xmlstarlet
+          nmap -sV -p 3000 -oX scan.xml localhost
+          docker cp scan.xml gvm:/tmp/scan.xml
+
+
+      - name: Import and Scan using GVM
+        run: |
+          docker exec gvm gvmd --create-user=ci-user --password=ci-pass
+          docker exec gvm omp -u ci-user -w ci-pass --create-target --name="Juice Shop" --hosts=localhost
+          TARGET_ID=$(docker exec gvm omp -u ci-user -w ci-pass --get-targets | grep "Juice Shop" | cut -d '"' -f2)
+          TASK_ID=$(docker exec gvm omp -u ci-user -w ci-pass --create-task --name="Juice Shop Scan" --target=$TARGET_ID)
+          docker exec gvm omp -u ci-user -w ci-pass --start-task $TASK_ID
+
+          # Wait for task to complete (polling loop)
+          echo "⏳ Waiting for GVM scan to complete..."
+          for i in {1..20}; do
+            STATUS=$(docker exec gvm omp -u ci-user -w ci-pass --get-tasks | grep $TASK_ID | grep -oP '(?<=status=")[^"]+')
+            echo "Current status: $STATUS"
+            if [[ "$STATUS" == "Done" ]]; then break; fi
+            sleep 30
+          done
+
+          docker exec gvm omp -u ci-user -w ci-pass --get-report $TASK_ID --format TXT > openvas_report.txt
+
+      - name: Upload OpenVAS Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: openvas-report
+          path: openvas_report.txt
+
+      - name: Create GitHub Issue for Vulnerabilities
+        uses: peter-evans/create-issue-from-file@v4
+        with:
+          title: OpenVAS Vulnerabilities Report
+          content-file: openvas_report.txt
+          labels: security, vulnerability
