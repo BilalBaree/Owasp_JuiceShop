@@ -2,9 +2,9 @@ name: Secure CI/CD Pipeline
 
 on:
   push:
-    branches: master
+    branches: Feature_Branch
   pull_request:
-    branches: master
+    branches: Feature_Branch
 
 jobs:
 
